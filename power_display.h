@@ -1,13 +1,14 @@
 // power_display.h
 // Round 800x800 power-flow dashboard for the Waveshare ESP32-P4 3.4" display.
-//
-// Three pages, tap the screen to cycle:
-//   0 - Power Flow  : live solar/grid/battery/home wattage + clock
-//   1 - Today       : daily kWh totals + energy cost/savings
-//   2 - Sun & Loads : solar radiation, sunrise/sunset, EV charger, A/C
+// One glanceable page, nothing to tap through:
+//   - outer ring: live solar/grid/battery/home power flow (gauge arcs)
+//   - 4 corner tiles: live wattage (icon + big number) plus a small daily
+//     total tucked into the unused space above/below each icon
+//   - center: clock, grid status/WiFi, today's cost or savings, and EV/A-C
+//     load badges (only colored up when actually drawing power)
 //
 // All sensor state is pulled straight from id(...) so the YAML lambda call
-// stays a one-liner: draw_all(it, font_64, font_28, font_20, icon_96, icon_40, 800, 800);
+// stays a one-liner: draw_all(it, font_64, font_40, font_20, icon_96, icon_40, 800, 800);
 
 // ---------- small helpers ----------
 
@@ -136,18 +137,7 @@ void draw_wifi_icon(esphome::display::Display& it,
     it.print(x, y, &font, color, TextAlign::CENTER, glyph);
 }
 
-void draw_page_dots(esphome::display::Display& it,
-                     int cx, int y, int count, int active,
-                     esphome::Color& on, esphome::Color& off) {
-    int spacing = 22;
-    int start_x = cx - (spacing * (count - 1)) / 2;
-    for (int i = 0; i < count; i++) {
-        esphome::Color c = (i == active) ? on : off;
-        it.filled_circle(start_x + i * spacing, y, 5, c);
-    }
-}
-
-// Icon + big number + small unit label, used by all three pages.
+// Icon + big number + small unit label.
 void draw_stat_tile(esphome::display::Display& it,
                      esphome::display::BaseFont& big_font,
                      esphome::display::BaseFont& small_font,
@@ -162,30 +152,6 @@ void draw_stat_tile(esphome::display::Display& it,
     it.print(icon_x, icon_y, &icon_font, icon_color, TextAlign::CENTER, icon);
     format_number(it, big_font, value_color, TextAlign::CENTER, num_x, num_y, value);
     it.print(num_x, num_y + 32, &small_font, value_color, TextAlign::CENTER, unit);
-}
-
-// Same as draw_stat_tile, but shows a dimmed "--- / PENDING" placeholder
-// when value is NaN instead of a misleading number.
-void draw_stat_tile_or_pending(esphome::display::Display& it,
-                                esphome::display::BaseFont& big_font,
-                                esphome::display::BaseFont& small_font,
-                                esphome::display::BaseFont& icon_font,
-                                int icon_x, int icon_y,
-                                int num_x, int num_y,
-                                const char* icon,
-                                float value,
-                                const char* unit,
-                                esphome::Color& icon_color,
-                                esphome::Color& value_color,
-                                esphome::Color& dim_color) {
-    if (isnan(value)) {
-        it.print(icon_x, icon_y, &icon_font, dim_color, TextAlign::CENTER, icon);
-        it.print(num_x, num_y, &big_font, dim_color, TextAlign::CENTER, "--");
-        it.print(num_x, num_y + 32, &small_font, dim_color, TextAlign::CENTER, "PENDING");
-        return;
-    }
-    draw_stat_tile(it, big_font, small_font, icon_font, icon_x, icon_y, num_x, num_y,
-                    icon, value, unit, icon_color, value_color);
 }
 
 // ---------- daily energy buffers ----------
@@ -276,189 +242,14 @@ float energy_today(float current, float baseline) {
     return delta;
 }
 
-// ---------- pages ----------
-
-void draw_flow_page(esphome::display::Display& it,
-                     esphome::display::BaseFont& big_font,
-                     esphome::display::BaseFont& med_font,
-                     esphome::display::BaseFont& small_font,
-                     esphome::display::BaseFont& icon_font,
-                     esphome::display::BaseFont& icon_font_sm,
-                     int width, int height,
-                     esphome::Color& white, esphome::Color& dim,
-                     esphome::Color& red, esphome::Color& green,
-                     esphome::Color& blue) {
-    float grid = id(grid_power).state;
-    float batt = id(battery_power).state;
-    float solar = id(solar_power).state;
-    float home = id(home_power).state;
-    float charge = id(battery_charge).state;
-
-    esphome::Color home_c = (home >= 0) ? white : green;
-    esphome::Color grid_c = (grid >= 0) ? red : green;
-    esphome::Color solar_c = white;
-    esphome::Color batt_c = (batt < -0.1) ? blue : white;
-
-    draw_stat_tile(it, big_font, small_font, icon_font,
-                    int(width * 0.3125), int(width * 0.229166667),
-                    int(width * 0.3125), int(width * 0.395833333),
-                    "󰋜", home, "W", white, home_c);
-    draw_stat_tile(it, big_font, small_font, icon_font,
-                    int(width - width * 0.3125), int(width * 0.229166667),
-                    int(width - width * 0.3125), int(width * 0.395833333),
-                    "󰴾", grid, "W", white, grid_c);
-    draw_stat_tile(it, big_font, small_font, icon_font,
-                    int(width * 0.3125), int(width - width * 0.229166667),
-                    int(width * 0.3125), int(width - width * 0.395833333),
-                    "󰶜", solar, "W", white, solar_c);
-
-    draw_battery_icon(it, charge, batt, int(width - width * 0.3125), int(width - width * 0.229166667),
-                       icon_font, white, red);
-    format_number(it, big_font, batt_c, TextAlign::CENTER,
-                  int(width - width * 0.3125), int(width - width * 0.395833333), batt);
-    it.printf(int(width - width * 0.3125), int(width - width * 0.395833333) + 32,
-              &small_font, batt_c, TextAlign::CENTER, "W  %.0f%%", charge);
-
-    // center clock
-    int cx = width / 2, cy = height / 2;
-    auto now = id(my_time).now();
-    if (now.is_valid()) {
-        it.strftime(cx, cy - 34, &big_font, white, TextAlign::CENTER, "%H:%M", now);
-        it.strftime(cx, cy + 6, &small_font, dim, TextAlign::CENTER, "%a %b %d", now);
-    } else {
-        it.print(cx, cy - 34, &big_font, dim, TextAlign::CENTER, "--:--");
-    }
-
-    bool gstatus = id(grid_status).state;
-    esphome::Color status_c = gstatus ? green : (id(flash) ? red : dim);
-    it.print(cx, cy + 44, &small_font, status_c, TextAlign::CENTER, gstatus ? "GRID OK" : "GRID DOWN");
-    draw_wifi_icon(it, id(wifi_signal_db).state, cx - 55, cy + 44, icon_font_sm, dim);
-}
-
-void draw_today_page(esphome::display::Display& it,
-                      esphome::display::BaseFont& big_font,
-                      esphome::display::BaseFont& med_font,
-                      esphome::display::BaseFont& small_font,
-                      esphome::display::BaseFont& icon_font,
-                      int width, int height,
-                      esphome::Color& white, esphome::Color& dim,
-                      esphome::Color& red, esphome::Color& green) {
-    float solar_kwh = energy_today(id(solar_energy_total).state, id(solar_energy_buffer)[0]);
-    float home_kwh = energy_today(id(home_energy_total).state, id(home_energy_buffer)[0]);
-    float grid_in_kwh = energy_today(id(grid_import_total).state, id(grid_import_energy_buffer)[0]);
-    float grid_out_kwh = energy_today(id(grid_export_total).state, id(grid_export_energy_buffer)[0]);
-    float cost = energy_today(id(cost_total).state, id(cost_energy_buffer)[0]);
-    float charge = id(battery_charge).state;
-
-    it.print(width / 2, int(height * 0.06), &small_font, dim, TextAlign::CENTER, "TODAY");
-
-    draw_stat_tile_or_pending(it, big_font, small_font, icon_font,
-                    int(width * 0.3125), int(width * 0.229166667),
-                    int(width * 0.3125), int(width * 0.395833333),
-                    "󰋜", home_kwh, "kWh", white, white, dim);
-    draw_stat_tile_or_pending(it, big_font, small_font, icon_font,
-                    int(width - width * 0.3125), int(width * 0.229166667),
-                    int(width - width * 0.3125), int(width * 0.395833333),
-                    "󰴾", grid_in_kwh, "kWh in", white, white, dim);
-    if (isnan(grid_out_kwh)) {
-        it.print(int(width - width * 0.3125), int(width * 0.395833333) + 56,
-                  &small_font, dim, TextAlign::CENTER, "-- kWh out");
-    } else {
-        it.printf(int(width - width * 0.3125), int(width * 0.395833333) + 56,
-                  &small_font, dim, TextAlign::CENTER, "%.1f kWh out", grid_out_kwh);
-    }
-    draw_stat_tile_or_pending(it, big_font, small_font, icon_font,
-                    int(width * 0.3125), int(width - width * 0.229166667),
-                    int(width * 0.3125), int(width - width * 0.395833333),
-                    "󰶜", solar_kwh, "kWh", white, white, dim);
-
-    it.print(int(width - width * 0.3125), int(width - width * 0.229166667), &icon_font, white,
-              TextAlign::CENTER, "󰂅");
-    if (isnan(charge)) {
-        it.print(int(width - width * 0.3125), int(width - width * 0.395833333), &big_font, dim,
-                  TextAlign::CENTER, "--");
-    } else {
-        it.printf(int(width - width * 0.3125), int(width - width * 0.395833333), &big_font, white,
-                  TextAlign::CENTER, "%.0f%%", charge);
-    }
-    it.print(int(width - width * 0.3125), int(width - width * 0.395833333) + 32, &small_font, dim,
-              TextAlign::CENTER, "CHARGE");
-
-    // center: cost or savings
-    int cx = width / 2, cy = height / 2;
-    if (isnan(cost)) {
-        it.print(cx, cy - 12, &big_font, dim, TextAlign::CENTER, "--");
-        it.print(cx, cy + 26, &small_font, dim, TextAlign::CENTER, "COST PENDING");
-    } else {
-        bool saved = cost <= 0;
-        esphome::Color cost_c = saved ? green : red;
-        it.printf(cx, cy - 12, &big_font, cost_c, TextAlign::CENTER, "$%.2f", fabs(cost));
-        it.print(cx, cy + 26, &small_font, dim, TextAlign::CENTER, saved ? "SAVED TODAY" : "COST TODAY");
-    }
-}
-
-void draw_loads_page(esphome::display::Display& it,
-                      esphome::display::BaseFont& big_font,
-                      esphome::display::BaseFont& med_font,
-                      esphome::display::BaseFont& small_font,
-                      esphome::display::BaseFont& icon_font,
-                      int width, int height,
-                      esphome::Color& white, esphome::Color& dim,
-                      esphome::Color& orange, esphome::Color& blue) {
-    float ev = id(ev_charger_power).state;
-    float ac = id(ac_power).state;
-    float radiation = id(solar_radiation).state;
-
-    it.print(width / 2, int(height * 0.06), &small_font, dim, TextAlign::CENTER, "SUN & LOADS");
-
-    // EV charger
-    esphome::Color ev_c = (ev > 10) ? orange : dim;
-    it.print(int(width * 0.3125), int(width * 0.229166667), &icon_font, ev_c, TextAlign::CENTER, "󰭬");
-    if (ev > 10) {
-        format_number(it, big_font, ev_c, TextAlign::CENTER, int(width * 0.3125), int(width * 0.395833333), ev);
-        it.print(int(width * 0.3125), int(width * 0.395833333) + 32, &small_font, ev_c, TextAlign::CENTER, "W EV");
-    } else {
-        it.print(int(width * 0.3125), int(width * 0.395833333), &med_font, dim, TextAlign::CENTER, "OFF");
-        it.print(int(width * 0.3125), int(width * 0.395833333) + 32, &small_font, dim, TextAlign::CENTER, "EV CHARGER");
-    }
-
-    // A/C
-    esphome::Color ac_c = (ac > 10) ? blue : dim;
-    it.print(int(width - width * 0.3125), int(width * 0.229166667), &icon_font, ac_c, TextAlign::CENTER, "󰵃");
-    if (ac > 10) {
-        format_number(it, big_font, ac_c, TextAlign::CENTER, int(width - width * 0.3125), int(width * 0.395833333), ac);
-        it.print(int(width - width * 0.3125), int(width * 0.395833333) + 32, &small_font, ac_c, TextAlign::CENTER, "W A/C");
-    } else {
-        it.print(int(width - width * 0.3125), int(width * 0.395833333), &med_font, dim, TextAlign::CENTER, "OFF");
-        it.print(int(width - width * 0.3125), int(width * 0.395833333) + 32, &small_font, dim, TextAlign::CENTER, "A/C");
-    }
-
-    // solar radiation
-    it.print(int(width * 0.3125), int(width - width * 0.229166667), &icon_font, white, TextAlign::CENTER, "󰶜");
-    format_number(it, big_font, white, TextAlign::CENTER, int(width * 0.3125), int(width - width * 0.395833333), radiation);
-    it.print(int(width * 0.3125), int(width - width * 0.395833333) + 32, &small_font, dim, TextAlign::CENTER, "W/m2 RAD");
-
-    // sunrise / sunset
-    int sx = int(width - width * 0.3125);
-    int sy1 = int(width - width * 0.44);
-    int sy2 = int(width - width * 0.36);
-    if (!id(sun_rise).state.empty()) {
-        it.printf(sx, sy1, &med_font, white, TextAlign::CENTER, "RISE %s", id(sun_rise).state.c_str());
-        it.printf(sx, sy2, &med_font, white, TextAlign::CENTER, "SET  %s", id(sun_set).state.c_str());
-    } else {
-        it.print(sx, sy1, &small_font, dim, TextAlign::CENTER, "SUN DATA");
-        it.print(sx, sy2, &small_font, dim, TextAlign::CENTER, "PENDING");
-    }
-}
-
 // ---------- entry point, called from the display lambda ----------
 
 void draw_all(esphome::display::Display& it,
-              esphome::display::BaseFont& big_font,
-              esphome::display::BaseFont& med_font,
-              esphome::display::BaseFont& small_font,
-              esphome::display::BaseFont& icon_font,
-              esphome::display::BaseFont& icon_font_sm,
+              esphome::display::BaseFont& big_font,    // font_64  - quadrant live numbers
+              esphome::display::BaseFont& clock_font,  // font_40  - center clock
+              esphome::display::BaseFont& small_font,  // font_20  - all captions
+              esphome::display::BaseFont& icon_font,   // icon_96  - quadrant icons
+              esphome::display::BaseFont& icon_font_sm,// icon_40  - wifi icon
               int width, int height) {
     auto black = Color(0, 0, 0);
     auto white = Color(255, 255, 255);
@@ -499,17 +290,116 @@ void draw_all(esphome::display::Display& it,
         it.filled_circle(cx, cy, width / 2 - 40, Color(90, 0, 0));
     }
 
-    int page_idx = id(page) % 3;
-    if (page_idx == 0) {
-        draw_flow_page(it, big_font, med_font, small_font, icon_font, icon_font_sm, width, height,
-                        white, dim, red, green, blue);
-    } else if (page_idx == 1) {
-        draw_today_page(it, big_font, med_font, small_font, icon_font, width, height,
-                         white, dim, red, green);
+    int tl_x = int(width * 0.3125);
+    int tr_x = int(width - width * 0.3125);
+    int top_icon_y = int(width * 0.229166667);
+    int top_num_y = int(width * 0.395833333);
+    int bot_icon_y = int(width - width * 0.229166667);
+    int bot_num_y = int(width - width * 0.395833333);
+    // Small caption rows tucked into the otherwise-empty space between each
+    // icon and the outer gauge ring.
+    int top_cap_y = int(height * 0.14);
+    int bot_cap_y1 = int(height * 0.845);
+    int bot_cap_y2 = int(height * 0.90);
+
+    // ---- Home (top-left): live watts + today's kWh ----
+    float home = id(home_power).state;
+    esphome::Color home_c = (home >= 0) ? white : green;
+    draw_stat_tile(it, big_font, small_font, icon_font, tl_x, top_icon_y, tl_x, top_num_y,
+                    "󰋜", home, "W", white, home_c);
+    float home_kwh = energy_today(id(home_energy_total).state, id(home_energy_buffer)[0]);
+    if (isnan(home_kwh)) {
+        it.print(tl_x, top_cap_y, &small_font, dim, TextAlign::CENTER, "-- kWh");
     } else {
-        draw_loads_page(it, big_font, med_font, small_font, icon_font, width, height,
-                         white, dim, orange, blue);
+        it.printf(tl_x, top_cap_y, &small_font, dim, TextAlign::CENTER, "%.1f kWh", home_kwh);
     }
 
-    draw_page_dots(it, cx, height - 34, 3, page_idx, white, dim);
+    // ---- Grid (top-right): live watts + today's net kWh (import - export) ----
+    float grid = id(grid_power).state;
+    esphome::Color grid_c = (grid >= 0) ? red : green;
+    draw_stat_tile(it, big_font, small_font, icon_font, tr_x, top_icon_y, tr_x, top_num_y,
+                    "󰴾", grid, "W", white, grid_c);
+    float grid_in = energy_today(id(grid_import_total).state, id(grid_import_energy_buffer)[0]);
+    float grid_out = energy_today(id(grid_export_total).state, id(grid_export_energy_buffer)[0]);
+    if (isnan(grid_in) || isnan(grid_out)) {
+        it.print(tr_x, top_cap_y, &small_font, dim, TextAlign::CENTER, "-- kWh net");
+    } else {
+        float net = grid_in - grid_out;
+        esphome::Color net_c = (net <= 0) ? green : dim;
+        it.printf(tr_x, top_cap_y, &small_font, net_c, TextAlign::CENTER, "%+.1f kWh net", net);
+    }
+
+    // ---- Solar (bottom-left): live watts + today's kWh + radiation ----
+    float solar = id(solar_power).state;
+    draw_stat_tile(it, big_font, small_font, icon_font, tl_x, bot_icon_y, tl_x, bot_num_y,
+                    "󰶜", solar, "W", white, white);
+    float solar_kwh = energy_today(id(solar_energy_total).state, id(solar_energy_buffer)[0]);
+    float radiation = id(solar_radiation).state;
+    // Nudged a bit toward center (vs. tl_x) so this longer combined line
+    // has room to clear the round edge of the display.
+    int solar_cap_x = tl_x + 25;
+    bool have_kwh = !isnan(solar_kwh);
+    bool have_rad = !isnan(radiation);
+    if (have_kwh && have_rad) {
+        it.printf(solar_cap_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "%.0f kWh  %.0f W/m2", solar_kwh, radiation);
+    } else if (have_kwh) {
+        it.printf(solar_cap_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "%.0f kWh  -- W/m2", solar_kwh);
+    } else if (have_rad) {
+        it.printf(solar_cap_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "-- kWh  %.0f W/m2", radiation);
+    } else {
+        it.print(solar_cap_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "-- kWh  -- W/m2");
+    }
+
+    // ---- Battery (bottom-right): live watts + charge % + sunrise/sunset ----
+    float batt = id(battery_power).state;
+    float charge = id(battery_charge).state;
+    esphome::Color batt_c = (batt < -0.1) ? blue : white;
+    draw_battery_icon(it, charge, batt, tr_x, bot_icon_y, icon_font, white, red);
+    format_number(it, big_font, batt_c, TextAlign::CENTER, tr_x, bot_num_y, batt);
+    it.printf(tr_x, bot_num_y + 32, &small_font, batt_c, TextAlign::CENTER, "%.0f%%", charge);
+    if (!id(sun_rise).state.empty()) {
+        it.printf(tr_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "R %s", id(sun_rise).state.c_str());
+        it.printf(tr_x, bot_cap_y2, &small_font, dim, TextAlign::CENTER, "S %s", id(sun_set).state.c_str());
+    } else {
+        it.print(tr_x, bot_cap_y1, &small_font, dim, TextAlign::CENTER, "SUN --");
+    }
+
+    // ---- Center: clock, status, cost, loads ----
+    auto now = id(my_time).now();
+    if (now.is_valid()) {
+        it.strftime(cx, cy - 45, &clock_font, white, TextAlign::CENTER, "%H:%M", now);
+        it.strftime(cx, cy - 16, &small_font, dim, TextAlign::CENTER, "%a %b %d", now);
+    } else {
+        it.print(cx, cy - 45, &clock_font, dim, TextAlign::CENTER, "--:--");
+    }
+
+    bool gstatus = id(grid_status).state;
+    esphome::Color status_c = gstatus ? green : (id(flash) ? red : dim);
+    draw_wifi_icon(it, id(wifi_signal_db).state, cx - 60, cy + 8, icon_font_sm, dim);
+    it.print(cx + 15, cy + 8, &small_font, status_c, TextAlign::CENTER, gstatus ? "GRID OK" : "GRID DOWN");
+
+    float cost = energy_today(id(cost_total).state, id(cost_energy_buffer)[0]);
+    if (isnan(cost)) {
+        it.print(cx, cy + 30, &small_font, dim, TextAlign::CENTER, "COST PENDING");
+    } else {
+        bool saved = cost <= 0;
+        esphome::Color cost_c = saved ? green : red;
+        it.printf(cx, cy + 30, &small_font, cost_c, TextAlign::CENTER,
+                  saved ? "+$%.2f today" : "-$%.2f today", fabs(cost));
+    }
+
+    float ev = id(ev_charger_power).state;
+    float ac = id(ac_power).state;
+    esphome::Color ev_c = (ev > 10) ? orange : dim;
+    esphome::Color ac_c = (ac > 10) ? blue : dim;
+    if (ev > 10) {
+        it.printf(cx - 70, cy + 54, &small_font, ev_c, TextAlign::CENTER, "EV %.0fW", ev);
+    } else {
+        it.print(cx - 70, cy + 54, &small_font, ev_c, TextAlign::CENTER, "EV --");
+    }
+    if (ac > 10) {
+        it.printf(cx + 70, cy + 54, &small_font, ac_c, TextAlign::CENTER, "A/C %.0fW", ac);
+    } else {
+        it.print(cx + 70, cy + 54, &small_font, ac_c, TextAlign::CENTER, "A/C --");
+    }
 }
