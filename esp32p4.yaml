@@ -20,20 +20,6 @@ substitutions:
   grid_export_total_sensor: "sensor.EDIT_ME_grid_export_lifetime"
   cost_total_sensor: "sensor.EDIT_ME_energy_cost_lifetime"
 
-  # ---- EDIT ME: sunrise/sunset, pulled from HA instead of computed on-device.
-  # sun.sun's next_rising/next_setting attributes are UTC, so point these at
-  # two HA template sensors that pre-format them in local time, e.g.:
-  #   - trigger: time_pattern
-  #     minutes: "*"
-  #   sensor:
-  #     - name: Sunrise Time
-  #       state: "{{ as_timestamp(state_attr('sun.sun','next_rising')) | timestamp_custom('%I:%M %p') }}"
-  #     - name: Sunset Time
-  #       state: "{{ as_timestamp(state_attr('sun.sun','next_setting')) | timestamp_custom('%I:%M %p') }}"
-  # (or point straight at an existing sunrise/sunset sensor if you already have one)
-  sunrise_sensor: "sensor.EDIT_ME_sunrise_time"
-  sunset_sensor: "sensor.EDIT_ME_sunset_time"
-
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
@@ -103,12 +89,6 @@ packages:
   restart_base: !include common/restart_control.yaml
   status_base: !include common/status_control.yaml
 
-time:
-  - platform: homeassistant
-    id: ha_time
-    # No explicit timezone: current ESPHome + HA sync the timezone
-    # automatically over the API connection.
-
 sensor:
   # --- live power (existing) ---
   - platform: homeassistant
@@ -174,15 +154,15 @@ sensor:
     id: wifi_signal_db
     update_interval: 60s
 
-text_sensor:
-  - platform: homeassistant
-    name: "Sunrise Time"
-    entity_id: ${sunrise_sensor}
-    id: sunrise_time
-  - platform: homeassistant
-    name: "Sunset Time"
-    entity_id: ${sunset_sensor}
-    id: sunset_time
+# Sunrise/sunset text sensors (sun_rise / sun_set, already local time) are
+# assumed to already exist elsewhere in your config, e.g.:
+#   text_sensor:
+#     - platform: homeassistant
+#       id: sun_rise
+#       entity_id: sensor.sun_rise_local
+#     - platform: homeassistant
+#       id: sun_set
+#       entity_id: sensor.sun_set_local
 
 binary_sensor:
   - platform: homeassistant
