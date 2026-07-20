@@ -4,12 +4,27 @@ substitutions:
   friendly_name: "Waveshare ESP32 P4"
   powerwall_base: "sensor.home_energy_gateway"
 
+  # ---- EDIT ME: entities that don't follow the powerwall_base pattern ----
+  solar_radiation_sensor: "sensor.davis_iss_tx_6_solar_radiation"
+  ev_charger_power_sensor: "sensor.EDIT_ME_ev_charger_power"
+  ac_power_sensor: "sensor.EDIT_ME_ac_power"
+
+  # ---- EDIT ME: these must be the CUMULATIVE / lifetime (always-increasing)
+  # energy + cost sensors, e.g. state_class total_increasing. The device
+  # itself keeps a 30-day rolling buffer (see globals below) and derives
+  # "today" locally by subtracting the value it recorded at local midnight -
+  # you do not need a separate "today" or "daily" helper entity in HA.
+  solar_energy_total_sensor: "sensor.EDIT_ME_solar_energy_lifetime"
+  home_energy_total_sensor: "sensor.EDIT_ME_home_energy_lifetime"
+  grid_import_total_sensor: "sensor.EDIT_ME_grid_import_lifetime"
+  grid_export_total_sensor: "sensor.EDIT_ME_grid_export_lifetime"
+  cost_total_sensor: "sensor.EDIT_ME_energy_cost_lifetime"
+
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
-  includes: 
+  includes:
     - power_display.h
-
 esp32:
   board: esp32-p4
   cpu_frequency: 360MHz
@@ -19,21 +34,49 @@ esp32:
     type: esp-idf
     advanced:
       enable_idf_experimental_features: yes
-
 globals:
   - id: flash
     type: bool
     restore_value: no
     initial_value: "true"
-
+  # --- 30-day rolling buffers for the cumulative energy/cost sensors ---
+  # buffer[0] is the value recorded at local midnight "today" (i.e. today's
+  # baseline); buffer[1] is yesterday's, etc. -1 means "not recorded yet".
+  # Persisted to flash so a reboot doesn't lose today's running total.
+  - id: energy_last_year
+    type: int
+    restore_value: yes
+    initial_value: "-1"
+  - id: energy_last_doy
+    type: int
+    restore_value: yes
+    initial_value: "-1"
+  - id: solar_energy_buffer
+    type: float[30]
+    restore_value: yes
+    initial_value: "{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}"
+  - id: home_energy_buffer
+    type: float[30]
+    restore_value: yes
+    initial_value: "{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}"
+  - id: grid_import_energy_buffer
+    type: float[30]
+    restore_value: yes
+    initial_value: "{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}"
+  - id: grid_export_energy_buffer
+    type: float[30]
+    restore_value: yes
+    initial_value: "{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}"
+  - id: cost_energy_buffer
+    type: float[30]
+    restore_value: yes
+    initial_value: "{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1}"
 external_components:
   - source: github://pr#10425
     components: [mipi_dsi]
     refresh: 1s
-
 psram:
   speed: 200Mhz
-
 packages:
   logger_base: !include common/logger.yaml
   network_base: !include common/network.yaml
@@ -42,6 +85,7 @@ packages:
   status_base: !include common/status_control.yaml
 
 sensor:
+  # --- live power (existing) ---
   - platform: homeassistant
     name: "Solar Power"
     entity_id: ${powerwall_base}_solar_power
@@ -63,17 +107,66 @@ sensor:
     entity_id: ${powerwall_base}_charge
     id: battery_charge
 
+  # --- new: cumulative (lifetime) energy + cost; "today" is derived on-device ---
+  - platform: homeassistant
+    name: "Solar Energy Total"
+    entity_id: ${solar_energy_total_sensor}
+    id: solar_energy_total
+  - platform: homeassistant
+    name: "Home Energy Total"
+    entity_id: ${home_energy_total_sensor}
+    id: home_energy_total
+  - platform: homeassistant
+    name: "Grid Import Total"
+    entity_id: ${grid_import_total_sensor}
+    id: grid_import_total
+  - platform: homeassistant
+    name: "Grid Export Total"
+    entity_id: ${grid_export_total_sensor}
+    id: grid_export_total
+  - platform: homeassistant
+    name: "Energy Cost Total"
+    entity_id: ${cost_total_sensor}
+    id: cost_total
+
+  # --- new: sun & high-load devices ---
+  - platform: homeassistant
+    name: "Solar Radiation"
+    entity_id: ${solar_radiation_sensor}
+    id: solar_radiation
+  - platform: homeassistant
+    name: "EV Charger Power"
+    entity_id: ${ev_charger_power_sensor}
+    id: ev_charger_power
+  - platform: homeassistant
+    name: "AC Power"
+    entity_id: ${ac_power_sensor}
+    id: ac_power
+
+  # --- new: device diagnostics, no HA entity needed ---
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_db
+    update_interval: 60s
+
+# Sunrise/sunset text sensors (sun_rise / sun_set, already local time) are
+# assumed to already exist elsewhere in your config, e.g.:
+#   text_sensor:
+#     - platform: homeassistant
+#       id: sun_rise
+#       entity_id: sensor.sun_rise_local
+#     - platform: homeassistant
+#       id: sun_set
+#       entity_id: sensor.sun_set_local
+
 binary_sensor:
   - platform: homeassistant
     name: "Grid Status"
     entity_id: binary_${powerwall_base}_grid_status
     id: grid_status
-
-
 esp_ldo:
   - channel: 3
     voltage: 2.5V
-
 esp32_hosted:
   variant: ESP32C6
   reset_pin: GPIO54
@@ -84,13 +177,11 @@ esp32_hosted:
   d2_pin: GPIO16
   d3_pin: GPIO17
   active_high: true
-
 i2c:
   sda: GPIO7
   scl: GPIO8
   scan: true
-  frequency: 400kHz 
-
+  frequency: 400kHz
 touchscreen:
   - platform: gt911
     calibration:
@@ -102,12 +193,11 @@ touchscreen:
     on_touch:
       - lambda: |-
           ESP_LOGD("touchscreen", "Touch detected at (%d, %d)", touch.x, touch.y);
-      - light.turn_on: backlight          
+      - light.turn_on: backlight
     transform:
       swap_xy: true
       mirror_x: true
-      mirror_y: false  
-
+      mirror_y: false
 light:
   - platform: monochromatic
     output: backlight_pwm
@@ -115,18 +205,12 @@ light:
     id: backlight
     restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 250ms
-
 output:
   - platform: ledc
     pin: GPIO26
     id: backlight_pwm
     frequency: 100Hz
     inverted: True
-
-# touchscreen:
-#   platform: gt911
-#   id: my_touchscreen
-
 display:
     - platform: mipi_dsi
       model: WAVESHARE-P4-TOUCH-3.4C
@@ -135,34 +219,27 @@ display:
       auto_clear_enabled: true
       update_interval: 2s
       lambda: |
-        if (!id(grid_status).state ){
-          if (id(flash)){
-            id(flash) = false;
-          } else {
-            id(flash) = true;
-          }
-        }
         draw_all(it,
-              *id(font_48),
-              *id(icon_font_36),
-              800, 800,
-              id(grid_power).state,
-              id(battery_power).state,
-              id(solar_power).state,
-              id(home_power).state,
-              id(battery_charge).state,
-              id(grid_status).state,
-              id(flash));
-
-
+              *id(font_64),
+              *id(font_40),
+              *id(font_20),
+              *id(icon_96),
+              *id(icon_40),
+              800, 800);
 font:
   - file: 'fonts/GoogleSans-Medium.ttf'
-    id: font_48
+    id: font_64
     size: 64
+  - file: 'fonts/GoogleSans-Medium.ttf'
+    id: font_40
+    size: 40
+  - file: 'fonts/GoogleSans-Medium.ttf'
+    id: font_20
+    size: 20
   - file: 'materialdesignicons-webfont.ttf'
-    id: icon_font_36
+    id: icon_96
     size: 96
-    glyphs: [
+    glyphs: &mdi_glyphs [
       "󰤟", # mdi-wifi-strength-1
       "󰤢", # mdi-wifi-strength-2
       "󰤥", # mdi-wifi-strength-3
@@ -203,6 +280,7 @@ font:
       "󰤗", # mdi-tumble-dryer
       "󰓞", # mdi-stove
       ]
-
-
-
+  - file: 'materialdesignicons-webfont.ttf'
+    id: icon_40
+    size: 40
+    glyphs: *mdi_glyphs
