@@ -39,11 +39,6 @@ globals:
     type: bool
     restore_value: no
     initial_value: "true"
-  - id: page
-    type: int
-    restore_value: no
-    initial_value: "0"
-
   # --- 30-day rolling buffers for the cumulative energy/cost sensors ---
   # buffer[0] is the value recorded at local midnight "today" (i.e. today's
   # baseline); buffer[1] is yesterday's, etc. -1 means "not recorded yet".
@@ -198,7 +193,6 @@ touchscreen:
     on_touch:
       - lambda: |-
           ESP_LOGD("touchscreen", "Touch detected at (%d, %d)", touch.x, touch.y);
-          id(page) = (id(page) + 1) % 3;
       - light.turn_on: backlight
     transform:
       swap_xy: true
@@ -227,7 +221,7 @@ display:
       lambda: |
         draw_all(it,
               *id(font_64),
-              *id(font_28),
+              *id(font_40),
               *id(font_20),
               *id(icon_96),
               *id(icon_40),
@@ -237,8 +231,8 @@ font:
     id: font_64
     size: 64
   - file: 'fonts/GoogleSans-Medium.ttf'
-    id: font_28
-    size: 28
+    id: font_40
+    size: 40
   - file: 'fonts/GoogleSans-Medium.ttf'
     id: font_20
     size: 20
